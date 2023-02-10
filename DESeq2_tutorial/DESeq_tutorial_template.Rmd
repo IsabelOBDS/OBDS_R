@@ -541,6 +541,7 @@ keytypes(org.Mm.eg.db)      #to remind us of what keytypes are in this particula
 ```{r}
 
 shrunkenLFC_dds_results_df <- as.data.frame(shrunkenLFC_dds_results_obj)
+shrunkenLFC_dds_results_df <- rownames_to_column(shrunkenLFC_dds_results_df, var = "sample_ID")
 write_csv(shrunkenLFC_dds_results_df, "CD8_vs_CD4_DE_results_lfcshrinkage_allgenes.csv")
 ```
 

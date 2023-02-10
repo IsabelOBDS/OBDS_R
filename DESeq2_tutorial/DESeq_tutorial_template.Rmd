@@ -67,11 +67,12 @@ gene_info <- featurecounts_table %>%
 # to get a clean counts table where:
 # rows = genename, columns = samples
 counts_table <- featurecounts_table %>%
-                  column_to_rownames() %>%
-                  dplyr::select() %>%
+                  column_to_rownames("Geneid") %>%
+                  dplyr::select(ends_with(".bam")) %>%
+                   `colnames<-`(str_remove(colnames(.), ".bam"))  %>% 
                   as.matrix()
 
-
+dim(counts_table)
 
 # check the dimensions of this counts_table table using dim() -> should have 39,179 genes and 8 cols 
 
@@ -85,15 +86,26 @@ sample_info <- read_tsv("/t1-data/project/obds/shared/resources/3_r_stats_genomi
 sample_info
 
 # What class is the cell_type currently? 
+#Character 
 
-
+sample_info <- sample_info %>% 
+  mutate(
+    cell_type = factor(cell_type, levels = c("CD4", "CD8")),
+    genotype = factor(genotype, levels = c("Egr2_Egr3_KO", "Egr2_Kin")),
+    replicate = factor(replicate, levels = c("1", "2", "3")),
+  )
 
 # We want to change it to a factor with 2 levels (the hypothesis we will test)
 # Which should be our reference level? 
 
+# longer way to try
+# sample_info$cell_type <- factor(sample_info$cell_type, levels = c("CD4", "CD8"))
 
 # what other columns might we want to include in our design that we want to change to factors? 
 
+#longer way to try
+# sample_info$genotype <- factor(sample_info$genotype, levels = c("Egr2_Egr3_KO", "Egr2_Kin") )
+# unique(sample_info$genotype)
 
 
 ```
@@ -103,9 +115,9 @@ sample_info
 ```{r}
 # Column names of the count table and row names of the sample info table must be in the same order
 # Check this 
-
+colnames(counts_table) == rownames(sample_info)
 # make sample_info row names from sample_id 
-
+sample_info <- column_to_rownames(sample_info, "sample_id")
 # remove .bam from colnames 
 
 
@@ -115,7 +127,9 @@ sample_info
 
 ```{r}
 # look up function to use from slides, find help and create an object called dds
-dds <- 
+dds <-  DESeqDataSetFromMatrix(countData = counts_table, 
+                              colData = sample_info, 
+                              design = ~ genotype + cell_type)
   
 ```
 
@@ -124,24 +138,31 @@ dds <-
 ```{r}
 # what does it look like? - e.g. use str(dds)
 
-
+str(dds)
 # how to access counts
+assays(dds)$counts
 
+#or
+assay(dds, "counts")
 
+#or 
+head(counts(dds))
 # access colData i.e the sample info table
 
+colData(dds)
 
 # access rowData
-
+rowData(dds)
 
 # access the design
 
+design(dds)
 
 # does it have any rowRanges()?
-
+rowRanges(dds)
 
 # what are its rownames and colnames?
-
+rownames(dds)
 
 # what attributes does it have?
 
@@ -154,7 +175,7 @@ dds <-
 # practice subsetting dds object
 # select first 3 columns
 
-
+dds[, 1:3]
 ```
 
 # Filter out unexpressed genes 
@@ -167,10 +188,10 @@ dds <-
 ```{r}
 # filter out genes that have 0 counts across all samples and save as an object called `dds_filtered`
 
-
+dds_filtered <- dds[rowSums(counts(dds)) > 0,]
 # check dims of dds_filtered  
-  
-  
+dim(dds_filtered)
+
 ```
 
 # Perform exploratory analysis on dds_filtered object 
@@ -186,20 +207,22 @@ NOTE we only use this tranformed data for QC not for downstream analysis or diff
 
 ```{r}
 #transform data using `rlog()` functions
-rlog_transformed_dds <- 
+rlog_transformed_dds <- rlog(dds_filtered, blind = TRUE)
 
+#rlog adds a psudeo counts in zero values
 
 # Notes on `blind` parameter: 
   # blind = TRUE is default
   # blind = TRUE is not the appropriate choice if you expect many or majority of genes to have large differences in counts explainable by   experimental design
   # Mike Love recommends blind = FALSE for visualisation, clustering and machine learning but blind = TRUE for QC
-  # Experimental design is only used for calculating the gene-wise dispersion estimates in order to fit a trend line through the dispersions over the mean
+  # Experimental design is only used for calculating the gene-wise dispersion estimates in order to fit a trend line trough the dispersions over the mean
 
   
 #check the class of these variable objects 
-
+class(rlog_transformed_dds)
   
 #get and look at the tranformed counts table using `assay()`
+assay(rlog_transformed_dds)
 
 
 ```
@@ -212,7 +235,7 @@ rlog_transformed_dds <-
 
 ```{r}
 # get vst transformed data using vst() 
-vst_transformed_data <- 
+vst_transformed_data <- vst(dds_filtered, blind = FALSE)
 
 ```
 
@@ -221,18 +244,22 @@ vst_transformed_data <-
 
 
 ```{r}
+assay(rlog_transformed_dds)
 # get correlation matrix of the rlog_transformed counts matrix to get correlations between samples 
 
-
+cor_matrix <- cor(assay(rlog_transformed_dds), method = "spearman")
 # use pheatmap to plot the correlation matrix 
 
+pheatmap(cor_matrix,
+         color = (colorRampPalette(brewer.pal(n = 7, name = "Greens")))(100))
 ```
 
 # try ploting a heatmap of sample distances 
 
 ```{r}
 # get sample distances -> Annotated what this code is doing?
-sampleDists <- dist(t(assay(rlog_transformed_dds))) 
+sampleDists <- dist(t(assay(rlog_transformed_dds))) #t means transposed - dist genes based on their distance across samples. N-dimentianal space based on expression of gene1...gene n
+# dist is the distance between samples 
 sample_distances_matrix <- as.matrix(sampleDists) 
 
 pretty_blue_colors <- colorRampPalette(rev(brewer.pal(9, "Blues")) )(255)
@@ -245,7 +272,7 @@ pheatmap(sample_distances_matrix,
 
 What do you notice here!? what does it tell us about our data? 
 
-Answer: 
+Answer: Some of the data is duplicated. 88 and 82, 89 and 83 are identical samples.
 
 
 
@@ -254,26 +281,36 @@ Answer:
 ```{r}
 # remove the two suspect columns using [,] notation - remove suspicious samples 
 rlog_transformed_dds_subset <- rlog_transformed_dds[,1:6]
+colnames(rlog_transformed_dds_subset)
+# get distances
+sampleDists_subset <- dist(t(assay(rlog_transformed_dds_subset)))
+#make it a matrix
+sample_distances_matrix_subset <- as.matrix(sample_distances_matrix)
 
 # lets replot the correlation heatmap with the subsetted data - copy code and adjust from above
 
-
+pheatmap(sample_distances_matrix_subset,
+         clustering_distance_rows=sampleDists_subset,
+         clustering_distance_cols=sampleDists_subset, 
+         color = pretty_blue_colors)
 ```
 
 What do you notice now about the data and the clustering?
-
-
+The samples are clustering into two. This is reflective of the two cell types. This graph above is the correlation between the distances between samples the one above it is the correlation. 
 # Now lets use the plotPCA function from DESeq2 to plot PCA of rlog_transformed_data_subset
 
-```{r, fig.asp=1}
+```{r}
 # plot pca of rlog_transformed_dds using plotPCA()
-
-
+colData(rlog_transformed_dds_subset)
+plotPCA(rlog_transformed_dds_subset, intgroup = "cell_type") +
+  coord_cartesian()
+#or
+  #coord_fixed(ratio = 10)
 # what does the intgroup parameter do? have a go at changing it...
-
+# input an interesting group - a variable that would be in the column data
 
 # how many variable genes is it using for pca? 
-
+# default is 500. ntop = number of top genes to use for principal components, selected by highest row variance
 
 # plot the pca for all genes 
 
@@ -298,12 +335,11 @@ What do we need to do to our data???
 ## Update dds_filtered object if needed - call it dds_filtered_updated
 
 ```{r}
+dds_filtered_updated <- dds_filtered[,1:6]
 
-# do we need to remove/edit samples? 
-
+design(dds_filtered_updated)
 # do we want to update the design? Is this nessecary in this case?
-# e.g. design(dds) <- ~replicate + condition
-
+design(dds_filtered_updated) <- ~ cell_type
 ```
 
 
@@ -336,33 +372,49 @@ Have a look at the outputs
 ```{r}
 # Calculate the size factors for each sample using estimateSizeFactors()
 
+dds_filtered_updated <-  estimateSizeFactors(dds_filtered_updated)
+
 # Access the size factors from the dds_filtered_updated object
-
+size_factor <- sizeFactors(dds_filtered_updated)
 # Do you see any systematic differences in size factors between groups?
+colData(dds_filtered_updated)
 
+str(dds_filtered_updated)
 ```
 
 # Optional: Plot size factors as barchart using ggplot
 ```{r}
+size_factor_df <- as.data.frame(colData(dds_filtered_updated)) %>% 
+                  rownames_to_column(var = 'Sample')
+ggplot(size_factor_df, aes(x = Sample, y = size_factor, fill = cell_type)) +
+  geom_col()
 ```
 
 ## Get counts table normalised using size factors
 
 ```{r}
 # get counts table normalised using size factors - call it normalized_counts
-
+normalized_counts <- counts(dds_filtered_updated, normalized = TRUE)
 
 # check the class of the output
+class(normalized_counts)
 
 ```
 
-# 3. Estimate dispersions for each gene
+How to find out methods in a function 
+
+showMethods()
+
+https://www.rdocumentation.org/packages/methods/versions/3.6.2/topics/showMethods
+
+# 3. Estimate dispersions for each gene 
 
 ```{r}
 # Obtain dispersion estimates for each gene using estimateDispersions() 
-
+est_disp <- estimateDispersions(dds_filtered_updated)
 # Plot the per-gene dispersion estimates (DESeq2 has a helper function for this)
 
+plotDispEsts(est_disp)
 ```
 
 
@@ -370,7 +422,9 @@ Have a look at the outputs
 
 ```{r}
 # Tests for significance of coefficients in a negative binomial GLM, using previously calculated size factors and dispersion estimates and WaldTest
-
+wald_test <- nbinomWaldTest(dds_filtered_updated)
+results(wald_test)
+summary(results(wald_test))
 ```
 
 
@@ -378,14 +432,19 @@ Have a look at the outputs
 
 ```{r}
 # generate dds object 
+dds <-  DESeqDataSetFromMatrix(countData = counts_table, 
+                              colData = sample_info, 
+                              design = ~ cell_type)
 
 # filter rows with 0 counts 
+dds_filtered <- dds[rowSums(counts(dds)) > 0, ]
 
 # remove unwanted samples 
-
-# make DESeqDataSet (dds) object 
+dds_filtered_updated <- dds_filtered[,1:6]
 
 # run DESeq() 
+dds_filtered_updated <- DESeq(dds_filtered_updated)
+
 
 ```
 
@@ -393,7 +452,11 @@ Have a look at the outputs
 
 ```{r}
 # What do the results() and summary() do, what arguments can you specify? 
+#extract results
+results_obj <- results(dds_filtered_updated) # can use compare argument in this function
 
+#summarise the results
+summary(results_obj)
 
 ```
 
@@ -408,7 +471,7 @@ Have a look at the outputs
  
 ```{r}
 # Plot normalised counts for gene ENSMUSG00000041779
-
+plotCounts(dds_filtered_updated, "ENSMUSG00000041779", intgroup = "cell_type", normalized = TRUE)
 ```
 
 # Access the results table for the comparison between CD8 and CD4 T cells . Youu can also try to CD4 vs CD8 (i.e. switch the reference) - you could also try this for replicate 1 vs replicate 3 as a control 
@@ -416,7 +479,8 @@ Have a look at the outputs
 checkout `resultsNames()`  & `results()`
 
 ```{r}
-
+resultsNames(dds_filtered_updated)
+results_dds <- results(dds_filtered_updated, contrast = c("cell_type", "CD8", "CD4")) # you can change what you want to compare here, you do not have to go back to the start for this. 
 ```
 
 Table should contain log2 fold changes and p-values for all genes
@@ -424,14 +488,19 @@ Table should contain log2 fold changes and p-values for all genes
 # Plot a histogram of the raw and BH-adjusted p-values using ggplot – do they look as expected? for CD8 vs CD4
 
 ```{r}
+head(results_dds)
 
+results_dds_CD8vCD4 <- as.data.frame(results_dds)
+ggplot(results_dds_CD8vCD4) +
+  geom_histogram(aes(x = pvalue), fill = "blue", alpha = 0.5) +
+  geom_histogram(aes(x = padj), fill =  "green", alpha = 0.5)
 ```
 
 
 # Generate an MA plot of the log2 FC values for all genes using DESeq2 plotMA()
 
 ```{r}
-
+plotMA(dds_filtered_updated, alpha = 0.05) # alpha is the significance value (not the transparency)
 
 ```
 
@@ -440,7 +509,10 @@ Table should contain log2 fold changes and p-values for all genes
 ```{r}
 
 # call your results table  called shrunkenLFC_dds_results_obj
+resultsNames(dds_filtered_updated)
+shrunkenLFC_dds_results_obj <- lfcShrink(dds_filtered_updated, coef = "cell_type_CD8_vs_CD4", type = "normal")
 
+plotMA(shrunkenLFC_dds_results_obj, alpha = 0.05, type = "normal")
 ```
 
 
@@ -467,6 +539,8 @@ keytypes(org.Mm.eg.db)      #to remind us of what keytypes are in this particula
 # Export all the results to CSV
 
 ```{r}
+
+shrunkenLFC_dds_results_df <- as.data.frame(shrunkenLFC_dds_results_obj)
 write_csv(shrunkenLFC_dds_results_df, "CD8_vs_CD4_DE_results_lfcshrinkage_allgenes.csv")
 ```
 

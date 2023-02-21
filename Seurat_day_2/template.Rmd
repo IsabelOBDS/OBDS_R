@@ -22,13 +22,13 @@ library(gprofiler2)
 - use the `readRDS()` function to read in previously saved object
 
 ```{r}
-seurat_after_qc <- 
+seurat_after_qc <- readRDS("/project/obds/shared/resources/4_r_single_cell/singlecell_seuratday2/seurat_after_qc.rds")
 ```
 
 - Check the Default Assay
 
 ```{r}
-DefaultAssay()
+DefaultAssay(seurat_after_qc)
 ```
 
 
@@ -42,11 +42,14 @@ SCTransform vignette: https://satijalab.org/seurat/articles/sctransform_vignette
 
 Should we remove any confounding variables like we did for the RNA assay for Day 1?
 
-Do we want to use the same number of variable featuresn(n=1000) or more than what we used for `NormalizeData()` function.
+Do we want to use the same number of variable featuresn(n=2000) or more than what we used for `NormalizeData()` function.
 
 
 ```{r}
-seurat_after_qc <- SCTransform()
+seurat_after_qc <- SCTransform(seurat_after_qc, 
+                               assay = "RNA",
+                               variable.features.n = 2000,
+                               vars.to.regress = "percent_mt")
 ```
 
 Where is the new normalisation stored?
@@ -56,15 +59,17 @@ Explore the `seurat_after_qc` objects metadata and assays
 
 
 ```{r}
-
+Assays(seurat_after_qc)
+dim(seurat_after_qc)
+seurat_after_qc[[]]
 
 ```
 
 Is there a change? 
-Answer: 
+Answer: There is a change in the number of cells and features (I think)
 
 Are there new columns in the metadata?
-Answer: 
+Answer: Two new columns nCount_SCT and nFeature_SCT
 
 
 # Exercise
@@ -82,7 +87,20 @@ Answer:
 - Check to see how you can have fixed y axes (ylims) in the `VlnPlot()` function
 
 ```{r}
+VlnPlot(seurat_after_qc,
+        features = c("nCount_RNA", "nCount_SCT"),
+        group.by = "orig.ident",
+        same.y.lims = TRUE)
 
+# VlnPlot(seurat_after_qc,
+#         features = c("nCount_RNA", "nCount_SCT"),
+#         same.y.lims = TRUE)
+
+#to see clusters ^
+
+VlnPlot(seurat_after_qc,
+        features = c("nFeature_RNA", "nFeature_SCT"),
+        same.y.lims = TRUE)
 ```
 
 
@@ -95,16 +113,16 @@ Answer:
 Let's choose LYZ like day 1
 
 ```{r}
-DefaultAssay(seurat_after_qc) <- 
-ggplot_lyz_raw <- ggplot(FetchData(seurat_after_qc, ), aes(LYZ)) +
+DefaultAssay(seurat_after_qc) <- "SCT"
+ggplot_lyz_raw <- ggplot(FetchData(seurat_after_qc, vars = "LYZ", slot = "counts"), aes(LYZ)) +
     geom_histogram(fill = "grey", color = "black", bins = 100) +
     coord_cartesian(ylim = c(0, 500)) +
     cowplot::theme_cowplot()
-ggplot_lyz_normalised <- ggplot(FetchData(seurat_after_qc,), aes(LYZ)) +
+ggplot_lyz_normalised <- ggplot(FetchData(seurat_after_qc, vars = "LYZ", slot = "data"), aes(LYZ)) +
     geom_histogram(fill = "grey", color = "black", bins = 100) +
     coord_cartesian(ylim = c(0, 500)) +
     cowplot::theme_cowplot()
-ggplot_lyz_scaled <- ggplot(FetchData(seurat_after_qc, ), aes(LYZ)) +
+ggplot_lyz_scaled <- ggplot(FetchData(seurat_after_qc, vars = "LYZ", slot = "scale.data"), aes(LYZ)) +
     geom_histogram(fill = "grey", color = "black", bins = 100) +
     coord_cartesian(ylim = c(0, 500)) +
     cowplot::theme_cowplot()
@@ -136,8 +154,10 @@ How do the two gene lists compare?
 - Do we want to change the `reduction.name` argument so that we can still keep the RNA assay based PCA results?
   
 ```{r}
-DefaultAssay(seurat_after_qc) <- 
-seurat_after_qc <- RunPCA()
+DefaultAssay(seurat_after_qc) <- "SCT"
+seurat_after_qc <- RunPCA(seurat_after_qc, 
+                          reduction.name = "sct_pca")
+Reductions(seurat_after_qc)
 ```
 
 Check to see what reductions are now present in the object
@@ -152,7 +172,7 @@ Check to see what reductions are now present in the object
 - Do we need to specify the  reduction?
 
 ```{r}
-ElbowPlot()
+ElbowPlot(seurat_after_qc, ndims = 50, reduction = "sct_pca")
 ```
 
 - Run the UMAP technique on the first 20 principal components stored in the Seurat object and visualise the result as a scatterplot.
@@ -163,7 +183,10 @@ How can we specify that we want to use PCA run on the SCT Assay (sct.pca) in the
 
 
 ```{r}
-seurat_after_qc <- RunUMAP()
+seurat_after_qc <- RunUMAP(seurat_after_qc, 
+                           dims = 1:20, 
+                           reduction = "sct_pca",
+                           reduction.name = "sct_umap")
 ```
 
 Use DimPlot() to plot the umap. What happens if you try to specify different reductions with UMAPPlot?
@@ -171,8 +194,8 @@ Use DimPlot() to plot the umap. What happens if you try to specify different red
 Compare RNA based umap with sct.umap
 
 ```{r, fig.width=10}
-p1 <- ...   + ggtitle("RNA UMAP")
-p2 <-   ... + ggtitle("SCT UMAP")
+p1 <- DimPlot(seurat_after_qc, reduction = "umap", label = TRUE)  + ggtitle("RNA (default) UMAP")
+p2 <- DimPlot(seurat_after_qc, reduction = "sct_umap", label = TRUE)+ ggtitle("SCT UMAP")
 p1 + p2
 ```
 
@@ -187,7 +210,12 @@ p1 + p2
   Have you chosen the right `reduction` and `assay`? 
   
 ```{r}
-seurat_after_qc <-  FindNeighbors(seurat_after_qc,....)
+#Assays(seurat_after_qc)
+seurat_after_qc <-  FindNeighbors(seurat_after_qc,
+                                  reduction = "sct_pca",
+                                  dims = 1:20,
+                                  assay = "SCT")
+
 ```
 
 
@@ -199,7 +227,13 @@ seurat_after_qc <-  FindNeighbors(seurat_after_qc,....)
   - should we specify the `graph.name`?
 
 ```{r}
-seurat_after_qc <- FindClusters(seurat_after_qc,....)
+Graphs(seurat_after_qc)
+seurat_after_qc <- FindClusters(seurat_after_qc,
+                                graph.name = "SCT_snn",
+                                resolution = 0.5,
+                                algorithm = 1)
+
+#number of communities = number of clusters 
 ```
 
 
@@ -210,7 +244,8 @@ If you use the same resolution = o.5 and dims as RNA workflow do you get the sam
 Are cells in the same cluster across both RNA and SCT
 
 ```{r}
-table()
+table(seurat_after_qc$RNA_snn_res.0.5, seurat_after_qc$SCT_snn_res.0.5)
+#tble is tabulating - gives no. cells in each cluster using each method. 
 
 ```
 
@@ -219,9 +254,9 @@ table()
   
 
 ```{r}
-p1 <- DimPlot(seurat_after_qc,... ) + ggtitle("RNA UMAP")
-p2 <- DimPlot(seurat_after_qc,....) + ggtitle("SCT UMAP")
-p1 + p2
+p1 <- DimPlot(seurat_after_qc, reduction = "umap", label = TRUE) + ggtitle("RNA UMAP")
+p3 <- DimPlot(seurat_after_qc, reduction = "sct_umap", group.by = "SCT_snn_res.0.5", label = TRUE) + ggtitle("SCT UMAP")
+p1 + p3
 
 ```
 
@@ -239,8 +274,8 @@ Platelets : PPBP
 
 
 ```{r, fig.width=10, fig.height=8}
-FeaturePlot(seurat_after_qc, features = c("LYZ","FCGR3A","CD4","CD8A","GNLY","MS4A1","CST3","PPBP"), ...)
-FeaturePlot(seurat_after_qc, features = c("LYZ","FCGR3A","CD4","CD8A","GNLY","MS4A1","CST3","PPBP"), ...)
+FeaturePlot(seurat_after_qc, features = c("LYZ","FCGR3A","CD4","CD8A","GNLY","MS4A1","CST3","PPBP"), reduction = "umap", label = TRUE)
+FeaturePlot(seurat_after_qc, features = c("LYZ","FCGR3A","CD4","CD8A","GNLY","MS4A1","CST3","PPBP"), reduction = "sct_umap")
 ```
 
 Calculate the markers for these clusters from either the RNA or SCT assay
@@ -248,9 +283,20 @@ Calculate the markers for these clusters from either the RNA or SCT assay
 
 ```{r}
 
-seurat_markers_all <- FindAllMarkers()
+Idents(seurat_after_qc) <- "RNA_snn_res.0.5"
 
-seurat_markers_all_sct <- FindAllMarkers()
+seurat_markers_all <- FindAllMarkers(seurat_markers_all,
+                                     logfc.threshold = 0.25, 
+                                     min.pct = 0.25,
+                                     assay = "RNA"
+                                    )
+
+Idents(seurat_after_qc) <- "SCT_snn_res.0.5"
+
+seurat_markers_all_sct <- FindAllMarkers(seurat_after_qc,
+                                     logfc.threshold = 0.25, 
+                                     min.pct = 0.25,
+                                     assay = "SCT")
 
 ```
 
@@ -315,8 +361,9 @@ Dataset : 12-HTO dataset from four human cell lines
 Load in the UMI matrix for the RNA data and check the dimensions
 
 ```{r}
-hto12.umis <- readRDS()
-
+hto12.umis <- readRDS("/project/obds/shared/resources/4_r_single_cell/singlecell_seuratday2/hto12_umi_mtx.rds")
+dim(hto12.umis)
+head(hto12.umis)
 ```
 
 What do rows and columns represent?
@@ -329,7 +376,9 @@ Load in the HTO matrix and check the dimensions
  - How many cell barcodes and HTO samples do we have?
 
 ```{r}
-hto12.htos <- readRDS()
+hto12.htos <- readRDS("/project/obds/shared/resources/4_r_single_cell/singlecell_seuratday2/hto12_hto_mtx.rds")
+dim(hto12.htos)
+head(hto12.htos)
 ```
 
 
@@ -337,14 +386,18 @@ Now we only want to subset to those cell barcodes or cells (actually called as c
 - Check the class of the joint.bcs object and how many cell barcodes do we have in common
 
 ```{r}
-joint.bcs <- intersect()
+joint.bcs <- intersect(rownames(hto12.htos), colnames(hto12.umis))
+
+length(joint.bcs)
+#25088 barcodes in both datasets
+head(joint.bcs)
 
 ```
 
 Subset the RNA matrix to only the `joint.bcs` cell barcodes and check the dimensions
 
 ```{r}
-hto12.umis.common <- 
+hto12.umis.common <- hto12.umis[,joint.bcs]
 
 ```
 
@@ -357,7 +410,10 @@ hto12.umis.common <-
 
 
 ```{r}
-hto12_object <-
+hto12_object <- CreateSeuratObject(counts = hto12.umis.common,min.cells =3,  min.features = 200)
+hto12_object <- NormalizeData(hto12_object)
+hto12_object <- FindVariableFeatures(hto12_object, selection.method = "vst")
+hto12_object <- ScaleData(hto12_object, features = VariableFeatures(hto12_object))
 
 ```
 
@@ -369,7 +425,12 @@ Answer :
 
 
 ```{r}
-hto12.htos.common <- 
+hto12.htos.common <- t(hto12.htos[colnames(hto12_object),1:12]) # t is to transpose
+#colnames to select the columns in hto12.hto and we want the first 12 rows (HTO tags and the cols in metadata)
+head(hto12.htos.common)
+dim(hto12.htos.common)
+
+hto12.htos.common[1:5,1:5]
 ```
 
 Now use `CreateAssayObject()` to add the subsetted  HTO  matrix to the already created  `hto12_object` seurat object as a new assay called `HTO`
@@ -378,7 +439,7 @@ Answer :
 
 ```{r}
 
-hto12_object[["HTO"]] <- 
+hto12_object[["HTO"]] <- CreateAssayObject(hto12.htos.common) # double [[]] creates an assay
 
 ```
 
@@ -389,7 +450,7 @@ This is required because the HTO data is bimodal, i.e. the tag is either present
 
 ```{r}
 # check the Default Assay
-DefaultAssay(hto12_object) <- 
+DefaultAssay(hto12_object) <- "HTO"
 
 hto12_object <- NormalizeData(hto12_object, assay = "HTO", normalization.method = "CLR" , margin=1)
 ```
@@ -400,13 +461,16 @@ Demultiplex cells based on HTO enrichment
 Here we use Seurat Function `HTODemux()` to assign single cells to their original samples
 
 ```{r}
-hto12_object <- 
+hto12_object <- HTODemux(hto12_object,
+                         assay = "HTO")
+#positive quantile is the p value cut off. Default is 0.99
 ```
 
 Checkout the metadata column of the `hto12_object`, try to read the `HTODemux()` results output summary in the `Value` section to understand the results
 
 ```{r}
-
+hto12_object[[]]
+#HTO_maxID is the most likely lable. HTO_secondID is the second most likely lable. the margin is the score (fold change maybe? bigger the enrichment the more change it is the first lable). The first row has a lower score and is classed as a double.
 ```
 
 
@@ -418,7 +482,7 @@ We can visualise how many cells are classified as singlets, doublets and negativ
 Check the meta.data, which column do we want for this information?
 
 ```{r}
-table()
+table(hto12_object$hash.ID, hto12_object$HTO_maxID)
 
 
 ```
@@ -432,8 +496,8 @@ plot Max HTO signal
 ```{r, fig.height=8, fig.width=10}
 # Change the identities of the seurat object to the relevant metadata column
 
-Idents(hto12_object) <- 
-RidgePlot()
+Idents(hto12_object) <- "HTO_maxID"
+RidgePlot(hto12_object, assay = "HTO", features = c("KG1-C",	"K562-C"))
 ```
 
 
@@ -451,6 +515,8 @@ use the function `FeatureScatter()`
 ```{r}
 DefaultAssay(hto12_object) <- "HTO"
 
+FeatureScatter(hto12_object, feature1 = "HEK-A", feature2 = "HEK-B", group.by = "HTO_classification.global")
+FeatureScatter(hto12_object, feature1 = "HEK-A", feature2 = "HEK-B", group.by = "HTO_maxID")
 ```
 what do you notice ?
 
@@ -487,7 +553,7 @@ Answer:
 Visualize HTO signals in a heatmap , lookup `HTOHeatmap()`
 
 ```{r, fig.width=8}
-HTOHeatmap()
+HTOHeatmap(hto12_object)
 ```
 
 What do you notice?
